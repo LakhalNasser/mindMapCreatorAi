@@ -1,0 +1,113 @@
+from PyQt5.QtWidgets import *
+from PyQt5.QtGui import *
+from PyQt5.QtCore import *
+import math
+
+class Node(QGraphicsItem):
+    def __init__(self, text, level=0, parent=None):
+        super().__init__(parent)
+        self.text = text
+        self.level = level
+        self.connections = []
+        self.children = []
+        self.setFlag(QGraphicsItem.ItemIsMovable)
+        self.setFlag(QGraphicsItem.ItemIsSelectable)
+        self.setFlag(QGraphicsItem.ItemSendsGeometryChanges)
+        self.setAcceptHoverEvents(True)
+        
+        # تحسين الألوان وإضافة تدرجات
+        self.colors = [
+            QColor("#1E88E5"),  # المركز
+            QColor("#43A047"),  # الفروع الرئيسية
+            QColor("#FB8C00"),  # الفروع الفرعية
+            QColor("#8E24AA")   # التفاصيل
+        ]
+        self._hover_color = QColor("#64B5F6")
+        self._text_color = QColor("#FFFFFF")
+        self._is_hovered = False
+        
+    def boundingRect(self):
+        # تحسين حجم المربعات للنصوص العربية
+        fm = QFontMetrics(QFont("Arial", 12 - self.level))
+        width = max(150, fm.width(self.text) + 60)
+        height = max(80, fm.height() * 2 + 30)
+        return QRectF(-width/2, -height/2, width, height)
+        
+    def paint(self, painter, option, widget):
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        # إضافة تأثير الظل
+        shadow = QGraphicsDropShadowEffect()
+        shadow.setBlurRadius(10)
+        shadow.setOffset(3, 3)
+        shadow.setColor(QColor(0, 0, 0, 50))
+        
+        # رسم الخلفية مع التدرج
+        color = self.colors[min(self.level, len(self.colors)-1)]
+        if self._is_hovered:
+            color = self._hover_color
+            
+        gradient = QLinearGradient(self.boundingRect().topLeft(), 
+                                 self.boundingRect().bottomRight())
+        gradient.setColorAt(0, color.lighter(120))
+        gradient.setColorAt(1, color)
+        
+        rect = self.boundingRect()
+        painter.setBrush(QBrush(gradient))
+        painter.setPen(QPen(color.darker(120), 2))
+        painter.drawRoundedRect(rect, 15, 15)
+        
+        # تحسين عرض النص
+        font = QFont("Arial", 12 - self.level)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.setPen(QPen(self._text_color))
+        text_rect = rect.adjusted(15, 10, -15, -10)
+        painter.drawText(text_rect, Qt.AlignCenter | Qt.TextWordWrap, self.text)
+
+class Connection(QGraphicsLineItem):
+    def __init__(self, startNode, endNode):
+        super().__init__()
+        self.startNode = startNode
+        self.endNode = endNode
+        self.startNode.connections.append(self)
+        self.endNode.connections.append(self)
+        
+        # تحسين شكل الخطوط
+        self.setPen(QPen(QColor("#90A4AE"), 2, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        self.setZValue(-1)
+        
+        # إضافة تأثير الظل للخطوط
+        shadow = QGraphicsDropShadowEffect()
+        shadow.setBlurRadius(5)
+        shadow.setOffset(2, 2)
+        shadow.setColor(QColor(0, 0, 0, 30))
+        self.setGraphicsEffect(shadow)
+        
+        self.updatePosition()
+        
+    def updatePosition(self):
+        if not self.startNode or not self.endNode:
+            return
+            
+        # إنشاء خط منحني بين العقد
+        path = QPainterPath()
+        start_pos = self.startNode.pos()
+        end_pos = self.endNode.pos()
+        
+        # نقاط التحكم للمنحنى
+        ctrl1 = QPointF(
+            start_pos.x() + (end_pos.x() - start_pos.x()) * 0.4,
+            start_pos.y() + (end_pos.y() - start_pos.y()) * 0.1
+        )
+        ctrl2 = QPointF(
+            start_pos.x() + (end_pos.x() - start_pos.x()) * 0.6,
+            end_pos.y() - (end_pos.y() - start_pos.y()) * 0.1
+        )
+        
+        path.moveTo(start_pos)
+        path.cubicTo(ctrl1, ctrl2, end_pos)
+        
+        # تحويل المسار إلى خط
+        line = QLineF(start_pos, end_pos)
+        self.setLine(line)

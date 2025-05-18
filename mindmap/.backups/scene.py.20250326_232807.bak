@@ -1,0 +1,121 @@
+from PyQt5.QtWidgets import *
+from PyQt5.QtGui import *
+from PyQt5.QtCore import *
+from .models import Node, Connection
+import math
+import random
+
+class MindMapScene(QGraphicsScene):
+    def __init__(self):
+        super().__init__()
+        self.setSceneRect(-2000, -2000, 4000, 4000)
+        self.setBackgroundBrush(QColor("#FFFFFF"))
+        
+    def create_from_json(self, data):
+        self.clear()
+        
+        # Create center node
+        center_node = Node(data['center'], 0)
+        self.addItem(center_node)
+        center_node.setPos(0, 0)
+        
+        # Create branches
+        if 'branches' in data:
+            branch_count = len(data['branches'])
+            angle_step = 360 / branch_count
+            radius = 300  # Base radius for first level
+            
+            for i, branch_data in enumerate(data['branches']):
+                angle = math.radians(i * angle_step)
+                x = radius * math.cos(angle)
+                y = radius * math.sin(angle)
+                
+                # Create main branch node
+                branch_node = Node(branch_data['text'], 1)
+                self.addItem(branch_node)
+                branch_node.setPos(x, y)
+                
+                # Create connection to center
+                connection = Connection(center_node, branch_node)
+                self.addItem(connection)
+                
+                # Process children recursively
+                if 'children' in branch_data:
+                    self.create_children(branch_node, branch_data['children'], angle, radius)
+        
+        # Center the view
+        if self.views():
+            self.views()[0].centerOn(center_node)
+    
+    def create_children(self, parent_node, children_data, base_angle, parent_radius, level=2):
+        if not children_data:
+            return
+            
+        child_count = len(children_data)
+        angle_span = math.pi / (child_count + 1)  # Spread children in a semi-circle
+        radius = parent_radius * 0.6  # Reduce radius for each level
+        
+        for i, child_data in enumerate(children_data):
+            # Calculate position
+            child_angle = base_angle - (math.pi/3) + (angle_span * (i + 1))
+            x = parent_node.pos().x() + radius * math.cos(child_angle)
+            y = parent_node.pos().y() + radius * math.sin(child_angle)
+            
+            # Create child node
+            child_node = Node(child_data['text'], level)
+            self.addItem(child_node)
+            child_node.setPos(x, y)
+            
+            # Create connection
+            connection = Connection(parent_node, child_node)
+            self.addItem(connection)
+            
+            # Process next level recursively
+            if 'children' in child_data:
+                self.create_children(child_node, child_data['children'], 
+                                  child_angle, radius, level + 1)
+    
+    def arrange_nodes(self, root_node, start_angle=0, angle_span=360):
+        def arrange_recursive(node, level, angle, span):
+            if not node.children:
+                return
+                
+            child_count = len(node.children)
+            child_span = span / child_count
+            current_angle = angle - (span / 2)
+            
+            # Improve spacing between levels
+            base_radius = 250
+            level_factor = 0.8
+            radius = base_radius * (level_factor ** level)
+            
+            for child in node.children:
+                child_angle = current_angle + (child_span / 2)
+                x = radius * math.cos(math.radians(child_angle))
+                y = radius * math.sin(math.radians(child_angle))
+                
+                # Add small random offset to avoid overlap
+                x += random.uniform(-10, 10)
+                y += random.uniform(-10, 10)
+                
+                child.setPos(node.pos() + QPointF(x, y))
+                
+                # Adjust branch angle for deep levels
+                next_span = child_span * 0.9
+                arrange_recursive(child, level + 1, child_angle, next_span)
+                current_angle += child_span
+        
+        arrange_recursive(root_node, 0, start_angle, angle_span)
+
+    def mousePressEvent(self, event):
+        super().mousePressEvent(event)
+        if event.button() == Qt.LeftButton:
+            item = self.itemAt(event.scenePos(), QTransform())
+            if item and isinstance(item, Node):
+                item.setSelected(True)
+    
+    def mouseReleaseEvent(self, event):
+        super().mouseReleaseEvent(event)
+        for item in self.selectedItems():
+            if isinstance(item, Node):
+                item.setSelected(False)

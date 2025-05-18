@@ -1,0 +1,131 @@
+from PyQt5.QtWidgets import *
+from PyQt5.QtGui import *
+from PyQt5.QtCore import *
+from .models import Node, Connection
+import math
+
+class MindMapScene(QGraphicsScene):
+    def __init__(self):
+        super().__init__()
+        self.setSceneRect(-2000, -2000, 4000, 4000)
+        self.setBackgroundBrush(QColor("#FFFFFF"))
+        self.node_spacing_x = 200  # المسافة الأفقية بين العقد
+        self.node_spacing_y = 150  # المسافة الرأسية بين المستويات
+        self.root_node = None
+
+    def create_from_json(self, data):
+        self.clear()
+        
+        # إنشاء العقدة المركزية
+        self.root_node = Node(data['center'], 0)
+        self.addItem(self.root_node)
+        self.root_node.setPos(0, -900)  # وضع العقدة المركزية في الأعلى
+        
+        if 'branches' in data:
+            # تنظيم الفروع الرئيسية
+            self.organize_branches(self.root_node, data['branches'])
+            
+        # تحديث الروابط
+        self.update_all_connections()
+        
+        # تمركز العرض
+        if self.views():
+            self.views()[0].centerOn(self.root_node)
+
+    def organize_branches(self, parent_node, branches_data, level=1):
+        if not branches_data:
+            return
+            
+        total_width = len(branches_data) * self.node_spacing_x
+        start_x = -total_width / 2
+        
+        for i, branch_data in enumerate(branches_data):
+            # إنشاء عقدة الفرع
+            branch_node = Node(branch_data['text'], level)
+            self.addItem(branch_node)
+            
+            # حساب الموقع
+            x = start_x + (i * self.node_spacing_x)
+            y = parent_node.pos().y() + self.node_spacing_y
+            branch_node.setPos(x, y)
+            
+            # إنشاء الرابط
+            connection = self.create_curved_connection(parent_node, branch_node)
+            self.addItem(connection)
+            
+            # معالجة الفروع الفرعية
+            if 'children' in branch_data and branch_data['children']:
+                self.organize_children(branch_node, branch_data['children'], level + 1)
+
+    def organize_children(self, parent_node, children_data, level):
+        total_width = len(children_data) * (self.node_spacing_x * 0.8)  # تقليل المسافة للمستويات الأعمق
+        start_x = parent_node.pos().x() - (total_width / 2)
+        
+        for i, child_data in enumerate(children_data):
+            child_node = Node(child_data['text'], level)
+            self.addItem(child_node)
+            
+            # حساب الموقع مع مراعاة موقع الأب
+            x = start_x + (i * (self.node_spacing_x * 0.8))
+            y = parent_node.pos().y() + self.node_spacing_y
+            child_node.setPos(x, y)
+            
+            # إنشاء رابط منحني
+            connection = self.create_curved_connection(parent_node, child_node)
+            self.addItem(connection)
+            
+            # معالجة الأبناء بشكل متكرر
+            if 'children' in child_data and child_data['children']:
+                self.organize_children(child_node, child_data['children'], level + 1)
+
+    def create_curved_connection(self, start_node, end_node):
+        connection = Connection(start_node, end_node)
+        
+        # إنشاء مسار منحني للرابط
+        path = QPainterPath()
+        start_pos = start_node.pos()
+        end_pos = end_node.pos()
+        
+        # نقاط التحكم للمنحنى
+        ctrl1_y = start_pos.y() + (end_pos.y() - start_pos.y()) * 0.4
+        ctrl2_y = start_pos.y() + (end_pos.y() - start_pos.y()) * 0.6
+        
+        ctrl1 = QPointF(start_pos.x(), ctrl1_y)
+        ctrl2 = QPointF(end_pos.x(), ctrl2_y)
+        
+        path.moveTo(start_pos)
+        path.cubicTo(ctrl1, ctrl2, end_pos)
+        
+        return connection
+
+    def update_all_connections(self):
+        for item in self.items():
+            if isinstance(item, Connection):
+                item.updatePosition()
+
+    def mousePressEvent(self, event):
+        super().mousePressEvent(event)
+        if event.button() == Qt.LeftButton:
+            item = self.itemAt(event.scenePos(), QTransform())
+            if isinstance(item, Node):
+                # إضافة تأثير التحديد
+                item.setSelected(True)
+                item._hover_color = QColor("#FF5722")
+                item.update()
+
+    def mouseReleaseEvent(self, event):
+        super().mouseReleaseEvent(event)
+        for item in self.selectedItems():
+            if isinstance(item, Node):
+                item.setSelected(False)
+                item._hover_color = QColor("#64B5F6")
+                item.update()
+
+    def wheelEvent(self, event):
+        # تحسين التكبير/التصغير
+        if event.modifiers() == Qt.ControlModifier:
+            factor = 1.1 if event.delta() > 0 else 0.9
+            view = self.views()[0]
+            view.scale(factor, factor)
+        else:
+            super().wheelEvent(event)

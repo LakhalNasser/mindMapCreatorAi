@@ -1,0 +1,33 @@
+from PyQt5.QtWidgets import *
+from PyQt5.QtGui import *
+from PyQt5.QtCore import *
+from .models import Node, Connection
+
+class MindMapScene(QGraphicsScene):
+    def __init__(self):
+        super().__init__()
+        self.startNode = None
+        self.setSceneRect(-2000, -2000, 4000, 4000)
+        
+    def mousePressEvent(self, event):
+        if event.button() == Qt.RightButton:
+            text, ok = QInputDialog.getText(None, "Add Node", "Enter node text:")
+            if ok and text:
+                node = Node(text)
+                node.setPos(event.scenePos())
+                self.addItem(node)
+        super().mousePressEvent(event)
+        
+    def mouseDoubleClickEvent(self, event):
+        item = self.itemAt(event.scenePos(), QTransform())
+        if isinstance(item, Node):
+            if not self.startNode:
+                self.startNode = item
+                self.startNode.setSelected(True)
+            else:
+                if self.startNode != item:
+                    connection = Connection(self.startNode, item)
+                    self.addItem(connection)
+                self.startNode.setSelected(False)
+                self.startNode = None
+        super().mouseDoubleClickEvent(event)

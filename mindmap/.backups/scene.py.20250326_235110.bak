@@ -1,0 +1,189 @@
+from PyQt5.QtWidgets import *
+from PyQt5.QtGui import *
+from PyQt5.QtCore import *
+from .models import Node, Connection
+import math
+
+class MindMapScene(QGraphicsScene):
+    def __init__(self):
+        super().__init__()
+        self.setSceneRect(-2000, -2000, 4000, 4000)
+        self.setBackgroundBrush(QColor("#FAFAFA"))
+        
+        # ثوابت التنسيق
+        self.LEVEL_SPACING = 100      # المسافة الرأسية بين المستويات
+        self.NODE_SPACING = 120       # المسافة الأفقية الأساسية بين العقد
+        self.LEVEL_SCALE = 0.85      # معامل تقليص المسافات للمستويات العميقة
+        self.ROOT_Y = -600           # موقع العقدة الرئيسية
+        
+        self.nodes = []              # قائمة بجميع العقد
+        self.connections = []        # قائمة بجميع الروابط
+        self.root_node = None
+
+    def clear(self):
+        super().clear()
+        self.nodes = []
+        self.connections = []
+        self.root_node = None
+
+    def create_from_json(self, data):
+        self.clear()
+        
+        # إنشاء العقدة المركزية
+        self.root_node = self.create_node(data['center'], 0)
+        self.root_node.setPos(0, self.ROOT_Y)
+        
+        if 'branches' in data:
+            self.organize_tree(self.root_node, data['branches'])
+        
+        self.optimize_layout()
+        self.center_on_root()
+
+    def create_node(self, text, level):
+        node = Node(text, level)
+        self.addItem(node)
+        self.nodes.append(node)
+        return node
+
+    def create_connection(self, start_node, end_node):
+        connection = Connection(start_node, end_node)
+        self.addItem(connection)
+        self.connections.append(connection)
+        return connection
+
+    def organize_tree(self, parent_node, branches_data, level=1):
+        if not branches_data:
+            return
+        
+        # حساب العرض الكلي للمستوى
+        level_width = len(branches_data) * (self.NODE_SPACING * (self.LEVEL_SCALE ** level))
+        start_x = -level_width / 2
+        spacing = self.NODE_SPACING * (self.LEVEL_SCALE ** level)
+        
+        nodes_at_level = []
+        for i, branch_data in enumerate(branches_data):
+            # إنشاء العقدة
+            node = self.create_node(branch_data['text'], level)
+            x = start_x + (i * spacing)
+            y = parent_node.pos().y() + self.LEVEL_SPACING
+            node.setPos(x, y)
+            nodes_at_level.append(node)
+            
+            # إنشاء الرابط
+            self.create_connection(parent_node, node)
+            
+            # معالجة الفروع الفرعية
+            if 'children' in branch_data and branch_data['children']:
+                self.organize_tree(node, branch_data['children'], level + 1)
+        
+        # تحسين توزيع العقد في نفس المستوى
+        self.adjust_level_spacing(nodes_at_level)
+
+    def adjust_level_spacing(self, nodes):
+        """تحسين المسافات بين العقد في نفس المستوى"""
+        if len(nodes) <= 1:
+            return
+            
+        min_spacing = self.NODE_SPACING * (self.LEVEL_SCALE ** nodes[0].level)
+        
+        # حساب وتصحيح التداخلات
+        for i in range(len(nodes) - 1):
+            current = nodes[i]
+            next_node = nodes[i + 1]
+            actual_spacing = next_node.pos().x() - current.pos().x()
+            
+            if actual_spacing < min_spacing:
+                shift = (min_spacing - actual_spacing) / 2
+                current.setPos(current.pos().x() - shift, current.pos().y())
+                next_node.setPos(next_node.pos().x() + shift, next_node.pos().y())
+
+    def optimize_layout(self):
+        """تحسين التخطيط العام للشجرة"""
+        self.balance_tree()
+        self.update_all_connections()
+        self.ensure_no_overlaps()
+
+    def balance_tree(self):
+        """موازنة الشجرة بأكملها"""
+        def get_subtree_width(node):
+            if not node.childItems():
+                return node.boundingRect().width()
+            
+            width = 0
+            for child in [item for item in node.childItems() if isinstance(item, Node)]:
+                width += get_subtree_width(child)
+            return max(width, node.boundingRect().width())
+        
+        def adjust_subtree_position(node, x_offset):
+            node.setPos(node.pos().x() + x_offset, node.pos().y())
+            for child in [item for item in node.childItems() if isinstance(item, Node)]:
+                adjust_subtree_position(child, x_offset)
+        
+        # تطبيق الموازنة من الأسفل إلى الأعلى
+        for level in range(5, -1, -1):  # من المستوى 5 إلى 0
+            level_nodes = [node for node in self.nodes if node.level == level]
+            for node in level_nodes:
+                subtree_width = get_subtree_width(node)
+                current_width = node.boundingRect().width()
+                if subtree_width > current_width:
+                    adjust_subtree_position(node, (subtree_width - current_width) / 2)
+
+    def ensure_no_overlaps(self):
+        """التأكد من عدم وجود تداخلات بين العقد"""
+        def get_node_bounds(node):
+            rect = node.sceneBoundingRect()
+            return rect.left(), rect.right(), rect.top(), rect.bottom()
+        
+        for node in self.nodes:
+            bounds1 = get_node_bounds(node)
+            for other in self.nodes:
+                if node != other and node.level == other.level:
+                    bounds2 = get_node_bounds(other)
+                    if (bounds1[0] < bounds2[1] and bounds1[1] > bounds2[0] and
+                        bounds1[2] < bounds2[3] and bounds1[3] > bounds2[2]):
+                        # معالجة التداخل
+                        overlap_x = min(bounds1[1], bounds2[1]) - max(bounds1[0], bounds2[0])
+                        if node.pos().x() < other.pos().x():
+                            node.setPos(node.pos().x() - overlap_x/2, node.pos().y())
+                            other.setPos(other.pos().x() + overlap_x/2, other.pos().y())
+                        else:
+                            node.setPos(node.pos().x() + overlap_x/2, node.pos().y())
+                            other.setPos(other.pos().x() - overlap_x/2, other.pos().y())
+
+    def update_all_connections(self):
+        """تحديث جميع الروابط"""
+        for connection in self.connections:
+            connection.updatePosition()
+
+    def center_on_root(self):
+        """تمركز العرض على العقدة الرئيسية"""
+        if self.views() and self.root_node:
+            view = self.views()[0]
+            view.centerOn(self.root_node)
+            view.scale(0.8, 0.8)  # تصغير أولي للعرض الكامل
+
+    def mousePressEvent(self, event):
+        """معالجة النقر على العقد"""
+        super().mousePressEvent(event)
+        if event.button() == Qt.LeftButton:
+            item = self.itemAt(event.scenePos(), QTransform())
+            if isinstance(item, Node):
+                self.highlight_connected_nodes(item)
+
+    def highlight_connected_nodes(self, node):
+        """إبراز العقد المتصلة"""
+        for item in self.items():
+            if isinstance(item, Node):
+                item._is_highlighted = False
+                item.update()
+        
+        node._is_highlighted = True
+        for connection in self.connections:
+            if connection.startNode == node:
+                connection.endNode._is_highlighted = True
+                connection.endNode.update()
+            elif connection.endNode == node:
+                connection.startNode._is_highlighted = True
+                connection.startNode.update()
+        
+        node.update()

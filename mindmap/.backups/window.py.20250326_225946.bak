@@ -1,0 +1,115 @@
+from PyQt5.QtWidgets import *
+from PyQt5.QtGui import *
+from PyQt5.QtCore import *
+from .scene import MindMapScene
+from .chat_widget import ChatWidget
+import json
+
+class MindMapWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.initUI()
+        
+    def initUI(self):
+        self.setWindowTitle('AI-Powered Mind Map Creator')
+        self.setGeometry(100, 100, 1500, 800)
+        
+        # Create main widget and layout
+        main_widget = QWidget()
+        self.setCentralWidget(main_widget)
+        layout = QHBoxLayout(main_widget)
+        
+        # Create splitter
+        splitter = QSplitter(Qt.Horizontal)
+        layout.addWidget(splitter)
+        
+        # Add mind map view
+        self.scene = MindMapScene()
+        self.view = QGraphicsView(self.scene)
+        self.view.setRenderHint(QPainter.Antialiasing)
+        self.view.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
+        self.view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.view.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        splitter.addWidget(self.view)
+        
+        # Add chat widget
+        self.chat_widget = ChatWidget()
+        self.chat_widget.mindMapGenerated.connect(self.create_mind_map_from_data)
+        splitter.addWidget(self.chat_widget)
+        
+        # Set splitter sizes
+        splitter.setSizes([int(self.width() * 0.7), int(self.width() * 0.3)])
+        
+        self.createToolBar()
+        self.createStatusBar()
+        
+    def create_mind_map_from_data(self, data):
+        self.scene.clear()
+        
+        def create_node_recursive(node_data, parent=None):
+            node = Node(node_data['text'])
+            self.scene.addItem(node)
+            
+            if parent:
+                parent.add_child(node)
+                
+            if 'children' in node_data:
+                for child_data in node_data['children']:
+                    create_node_recursive(child_data, node)
+                    
+            return node
+            
+        # Create center node
+        center_node = create_node_recursive({'text': data['center']})
+        center_node.setPos(0, 0)
+        
+        # Create branches
+        for branch_data in data['branches']:
+            create_node_recursive(branch_data, center_node)
+            
+        # Arrange nodes
+        center_node.arrange_children()
+        
+    def createToolBar(self):
+        toolbar = QToolBar()
+        toolbar.setMovable(False)
+        self.addToolBar(toolbar)
+        
+        saveAction = QAction('Save', self)
+        saveAction.setShortcut('Ctrl+S')
+        saveAction.triggered.connect(self.saveMindMap)
+        toolbar.addAction(saveAction)
+        
+        loadAction = QAction('Load', self)
+        loadAction.setShortcut('Ctrl+O')
+        loadAction.triggered.connect(self.loadMindMap)
+        toolbar.addAction(loadAction)
+        
+        exportAction = QAction('Export as Image', self)
+        exportAction.setShortcut('Ctrl+E')
+        exportAction.triggered.connect(self.exportImage)
+        toolbar.addAction(exportAction)
+        
+    def createStatusBar(self):
+        self.statusBar().showMessage('Ready')
+        
+    def saveMindMap(self):
+        fileName, _ = QFileDialog.getSaveFileName(self, "Save Mind Map", "", "Mind Map Files (*.mmap)")
+        if fileName:
+            # Implementation for saving
+            pass
+            
+    def loadMindMap(self):
+        fileName, _ = QFileDialog.getOpenFileName(self, "Load Mind Map", "", "Mind Map Files (*.mmap)")
+        if fileName:
+            # Implementation for loading
+            pass
+            
+    def exportImage(self):
+        fileName, _ = QFileDialog.getSaveFileName(self, "Export as Image", "", "PNG Files (*.png)")
+        if fileName:
+            image = QImage(self.scene.sceneRect().size().toSize(), QImage.Format_ARGB32)
+            image.fill(Qt.white)
+            painter = QPainter(image)
+            self.scene.render(painter)
+            image.save(fileName)

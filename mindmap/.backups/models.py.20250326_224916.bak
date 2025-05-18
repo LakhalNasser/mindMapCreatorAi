@@ -1,0 +1,65 @@
+from PyQt5.QtWidgets import *
+from PyQt5.QtGui import *
+from PyQt5.QtCore import *
+
+class Node(QGraphicsItem):
+    def __init__(self, text, parent=None):
+        super().__init__(parent)
+        self.text = text
+        self.connections = []
+        self.setFlag(QGraphicsItem.ItemIsMovable)
+        self.setFlag(QGraphicsItem.ItemIsSelectable)
+        self.setFlag(QGraphicsItem.ItemSendsGeometryChanges)
+        self.setAcceptHoverEvents(True)
+        self._color = QColor("#2196F3")
+        self._hover_color = QColor("#64B5F6")
+        self._text_color = QColor("#FFFFFF")
+        self._is_hovered = False
+        
+    def boundingRect(self):
+        return QRectF(-60, -40, 120, 80)
+        
+    def paint(self, painter, option, widget):
+        painter.setRenderHint(QPainter.Antialiasing)
+        brush = QBrush(self._hover_color if self._is_hovered else self._color)
+        painter.setBrush(brush)
+        painter.setPen(QPen(Qt.NoPen))
+        painter.drawRoundedRect(self.boundingRect(), 10, 10)
+        
+        font = QFont("Arial", 10, QFont.Bold)
+        painter.setFont(font)
+        painter.setPen(QPen(self._text_color))
+        painter.drawText(self.boundingRect(), Qt.AlignCenter, self.text)
+    
+    def hoverEnterEvent(self, event):
+        self._is_hovered = True
+        self.update()
+        super().hoverEnterEvent(event)
+    
+    def hoverLeaveEvent(self, event):
+        self._is_hovered = False
+        self.update()
+        super().hoverLeaveEvent(event)
+        
+    def itemChange(self, change, value):
+        if change == QGraphicsItem.ItemPositionChange:
+            for connection in self.connections:
+                connection.updatePosition()
+        return super().itemChange(change, value)
+
+class Connection(QGraphicsLineItem):
+    def __init__(self, startNode, endNode):
+        super().__init__()
+        self.startNode = startNode
+        self.endNode = endNode
+        self.startNode.connections.append(self)
+        self.endNode.connections.append(self)
+        self._color = QColor("#90A4AE")
+        self._pen_width = 2
+        self.setZValue(-1)
+        self.setPen(QPen(self._color, self._pen_width))
+        self.updatePosition()
+        
+    def updatePosition(self):
+        line = QLineF(self.startNode.pos(), self.endNode.pos())
+        self.setLine(line)

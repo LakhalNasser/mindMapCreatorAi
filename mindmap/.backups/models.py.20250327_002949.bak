@@ -1,0 +1,188 @@
+from PyQt5.QtWidgets import *
+from PyQt5.QtGui import *
+from PyQt5.QtCore import *
+import math
+
+class Node(QGraphicsItem):
+    def __init__(self, text, level=0):
+        super().__init__()
+        self.text = text
+        self.level = level
+        self._is_highlighted = False
+        self._is_hovered = False
+        
+        # خصائص العقدة
+        self.setAcceptHoverEvents(True)
+        self.setFlag(QGraphicsItem.ItemIsMovable)
+        self.setFlag(QGraphicsItem.ItemSendsGeometryChanges)
+        
+        # الألوان حسب المستوى
+        self.colors = {
+            0: {"bg": QColor("#2196F3"), "border": QColor("#1976D2")},  # المركز
+            1: {"bg": QColor("#4CAF50"), "border": QColor("#388E3C")},  # المستوى الأول
+            2: {"bg": QColor("#FF9800"), "border": QColor("#F57C00")},  # المستوى الثاني
+            3: {"bg": QColor("#9C27B0"), "border": QColor("#7B1FA2")},  # المستوى الثالث
+            4: {"bg": QColor("#F44336"), "border": QColor("#D32F2F")}   # المستوى الرابع
+        }
+        
+        # أحجام العقد حسب المستوى
+        self.sizes = {
+            0: (180, 60),  # المركز
+            1: (160, 50),  # المستوى الأول
+            2: (140, 45),  # المستوى الثاني
+            3: (120, 40),  # المستوى الثالث
+            4: (100, 35)   # المستوى الرابع
+        }
+
+    def boundingRect(self):
+        width, height = self.sizes.get(self.level, (100, 35))
+        return QRectF(-width/2, -height/2, width, height)
+
+    def shape(self):
+        path = QPainterPath()
+        path.addRoundedRect(self.boundingRect(), 10, 10)
+        return path
+
+    def paint(self, painter, option, widget):
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        # تحديد لون العقدة
+        colors = self.colors.get(min(self.level, 4))
+        bg_color = colors["bg"]
+        border_color = colors["border"]
+        
+        # تأثيرات التحديد والتحويم
+        if self._is_highlighted:
+            bg_color = bg_color.lighter(120)
+            border_color = QColor("#FF5722")
+        elif self._is_hovered:
+            bg_color = bg_color.lighter(110)
+        
+        # رسم الظل
+        shadow = QGraphicsDropShadowEffect()
+        shadow.setBlurRadius(15)
+        shadow.setOffset(3, 3)
+        shadow.setColor(QColor(0, 0, 0, 50))
+        
+        # رسم الخلفية
+        rect = self.boundingRect()
+        gradient = QLinearGradient(rect.topLeft(), rect.bottomRight())
+        gradient.setColorAt(0, bg_color.lighter(110))
+        gradient.setColorAt(1, bg_color)
+        
+        painter.setBrush(QBrush(gradient))
+        painter.setPen(QPen(border_color, 2))
+        painter.drawRoundedRect(rect, 10, 10)
+        
+        # رسم النص
+        font = QFont("Arial", 10 - min(self.level, 3))
+        font.setBold(True)
+        painter.setFont(font)
+        
+        # تحديد لون النص
+        text_color = QColor("#FFFFFF") if not self._is_highlighted else QColor("#000000")
+        painter.setPen(QPen(text_color))
+        
+        # رسم النص مع التفاف الكلمات
+        text_rect = rect.adjusted(10, 5, -10, -5)
+        painter.drawText(text_rect, Qt.AlignCenter | Qt.TextWordWrap, self.text)
+
+    def hoverEnterEvent(self, event):
+        self._is_hovered = True
+        self.update()
+        super().hoverEnterEvent(event)
+
+    def hoverLeaveEvent(self, event):
+        self._is_hovered = False
+        self.update()
+        super().hoverLeaveEvent(event)
+
+    def itemChange(self, change, value):
+        if change == QGraphicsItem.ItemPositionChange:
+            # تحديث الروابط عند تحريك العقدة
+            for item in self.scene().items():
+                if isinstance(item, Connection) and (item.startNode == self or item.endNode == self):
+                    item.updatePosition()
+        return super().itemChange(change, value)
+
+class Connection(QGraphicsPathItem):
+    def __init__(self, startNode, endNode):
+        super().__init__()
+        self.startNode = startNode
+        self.endNode = endNode
+        
+        # خصائص الرابط
+        self.setZValue(-1)  # جعل الروابط خلف العقد
+        self.setPen(self.createConnectionPen())
+        self.updatePosition()
+
+    def createConnectionPen(self):
+        # إنشاء قلم مخصص للرابط
+        pen = QPen()
+        pen.setWidth(2)
+        pen.setColor(QColor("#90A4AE"))
+        pen.setCapStyle(Qt.RoundCap)
+        pen.setJoinStyle(Qt.RoundJoin)
+        
+        # إضافة نمط متقطع للمستويات العميقة
+        if self.endNode.level > 2:
+            pen.setStyle(Qt.DashLine)
+            pen.setDashPattern([6, 3])
+        
+        return pen
+
+    def updatePosition(self):
+        if not self.startNode or not self.endNode:
+            return
+            
+        # حساب نقاط البداية والنهاية
+        start = self.startNode.pos()
+        end = self.endNode.pos()
+        
+        # إنشاء مسار منحني
+        path = QPainterPath()
+        path.moveTo(start)
+        
+        # حساب نقاط التحكم للمنحنى
+        dx = end.x() - start.x()
+        dy = end.y() - start.y()
+        
+        ctrl1 = QPointF(
+            start.x() + dx * 0.5,
+            start.y() + dy * 0.2
+        )
+        ctrl2 = QPointF(
+            start.x() + dx * 0.5,
+            end.y() - dy * 0.2
+        )
+        
+        # رسم المنحنى
+        path.cubicTo(ctrl1, ctrl2, end)
+        self.setPath(path)
+        
+        # إضافة تأثير الظل
+        shadow = QGraphicsDropShadowEffect()
+        shadow.setBlurRadius(5)
+        shadow.setOffset(2, 2)
+        shadow.setColor(QColor(0, 0, 0, 30))
+        self.setGraphicsEffect(shadow)
+
+    def paint(self, painter, option, widget):
+        # تحسين جودة الرسم
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        # رسم المسار بتأثير التدرج
+        gradient = QLinearGradient(
+            self.startNode.pos(),
+            self.endNode.pos()
+        )
+        gradient.setColorAt(0, self.startNode.colors[min(self.startNode.level, 4)]["bg"])
+        gradient.setColorAt(1, self.endNode.colors[min(self.endNode.level, 4)]["bg"])
+        
+        # إنشاء قلم مع التدرج
+        pen = self.createConnectionPen()
+        pen.setBrush(QBrush(gradient))
+        
+        # رسم المسار
+        painter.setPen(pen)
+        painter.drawPath(self.path())

@@ -1,0 +1,114 @@
+from PyQt5.QtWidgets import *
+from PyQt5.QtGui import *
+from PyQt5.QtCore import *
+import math
+
+class Node(QGraphicsItem):
+    def __init__(self, text, level=0, parent=None):
+        super().__init__(parent)
+        self.text = text
+        self.level = level
+        self.connections = []
+        self.children = []
+        self.setFlag(QGraphicsItem.ItemIsMovable)
+        self.setFlag(QGraphicsItem.ItemIsSelectable)
+        self.setFlag(QGraphicsItem.ItemSendsGeometryChanges)
+        self.setAcceptHoverEvents(True)
+        
+        # Different colors for different levels
+        self.colors = [
+            QColor("#2196F3"),  # Center
+            QColor("#4CAF50"),  # Main branches
+            QColor("#FF9800"),  # Sub-branches
+            QColor("#9C27B0")   # Details
+        ]
+        self._hover_color = QColor("#64B5F6")
+        self._text_color = QColor("#FFFFFF")
+        self._is_hovered = False
+        
+    def boundingRect(self):
+        # Larger boxes for longer text
+        fm = QFontMetrics(QFont("Arial", 10 - self.level))
+        width = max(120, fm.width(self.text) + 40)
+        height = max(60, fm.height() + 20)
+        return QRectF(-width/2, -height/2, width, height)
+        
+    def paint(self, painter, option, widget):
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        # Select color based on level
+        color = self.colors[min(self.level, len(self.colors)-1)]
+        if self._is_hovered:
+            color = self._hover_color
+            
+        brush = QBrush(color)
+        painter.setBrush(brush)
+        painter.setPen(QPen(Qt.NoPen))
+        
+        rect = self.boundingRect()
+        painter.drawRoundedRect(rect, 10, 10)
+        
+        # Adjust font size based on level
+        font = QFont("Arial", 10 - self.level)
+        painter.setFont(font)
+        painter.setPen(QPen(self._text_color))
+        
+        # Word wrap for long text
+        text_rect = rect.adjusted(10, 5, -10, -5)
+        painter.drawText(text_rect, Qt.AlignCenter | Qt.TextWordWrap, self.text)
+
+    def add_child(self, child):
+        self.children.append(child)
+        connection = Connection(self, child)
+        self.scene().addItem(connection)
+        return connection
+
+    def arrange_children(self, start_angle=-60, angle_span=120, radius_factor=200):
+        if not self.children:
+            return
+            
+        # Calculate positions in a circular layout
+        count = len(self.children)
+        angle_step = angle_span / count
+        base_radius = radius_factor * (1 - self.level * 0.2)  # Reduce radius for deeper levels
+        
+        for i, child in enumerate(self.children):
+            angle = math.radians(start_angle + i * angle_step)
+            x = base_radius * math.cos(angle)
+            y = base_radius * math.sin(angle)
+            
+            child.setPos(x, y)
+            
+            # Recursively arrange children with smaller angle span and radius
+            child.arrange_children(
+                start_angle=start_angle + i * angle_step - angle_step/2,
+                angle_span=angle_step * 0.8,
+                radius_factor=radius_factor * 0.7
+            )
+
+class Connection(QGraphicsLineItem):
+    def __init__(self, startNode, endNode):
+        super().__init__()
+        self.startNode = startNode
+        self.endNode = endNode
+        self.startNode.connections.append(self)
+        self.endNode.connections.append(self)
+        
+        # Gradient color based on nodes' levels
+        gradient = QLinearGradient(self.startNode.pos(), self.endNode.pos())
+        gradient.setColorAt(0, self.startNode.colors[min(self.startNode.level, len(self.startNode.colors)-1)])
+        gradient.setColorAt(1, self.endNode.colors[min(self.endNode.level, len(self.endNode.colors)-1)])
+        
+        pen = QPen(gradient, 2)
+        pen.setStyle(Qt.SolidLine)
+        self.setPen(pen)
+        
+        self.setZValue(-1)
+        self.updatePosition()
+        
+    def updatePosition(self):
+        if not self.startNode or not self.endNode:
+            return
+            
+        line = QLineF(self.startNode.pos(), self.endNode.pos())
+        self.setLine(line)

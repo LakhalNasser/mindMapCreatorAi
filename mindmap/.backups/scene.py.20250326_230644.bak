@@ -1,0 +1,51 @@
+from PyQt5.QtWidgets import *
+from PyQt5.QtGui import *
+from PyQt5.QtCore import *
+from .models import Node, Connection
+
+class MindMapScene(QGraphicsScene):
+    def __init__(self):
+        super().__init__()
+        self.setSceneRect(-2000, -2000, 4000, 4000)
+        
+    def create_from_json(self, data):
+        self.clear()
+        
+        def create_node_recursive(node_data, level=0):
+            if isinstance(node_data, dict):
+                text = node_data.get('text', '')
+                node = Node(text, level)
+                self.addItem(node)
+                
+                if 'children' in node_data:
+                    for child_data in node_data['children']:
+                        child_node = create_node_recursive(child_data, level + 1)
+                        node.add_child(child_node)
+                        
+                return node
+            else:
+                node = Node(str(node_data), level)
+                self.addItem(node)
+                return node
+        
+        # Create center node
+        center_node = Node(data['center'], 0)
+        self.addItem(center_node)
+        center_node.setPos(0, 0)
+        
+        # Create branches
+        angle_per_branch = 360 / len(data['branches'])
+        for i, branch_data in enumerate(data['branches']):
+            branch_node = create_node_recursive(branch_data, 1)
+            center_node.add_child(branch_node)
+            
+            # Initial positioning
+            angle = i * angle_per_branch
+            branch_node.setPos(200 * math.cos(math.radians(angle)),
+                             200 * math.sin(math.radians(angle)))
+            
+        # Arrange all nodes
+        center_node.arrange_children(start_angle=0, angle_span=360)
+        
+        # Center the view
+        self.views()[0].centerOn(center_node)

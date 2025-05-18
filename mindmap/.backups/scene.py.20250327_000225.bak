@@ -1,0 +1,232 @@
+from PyQt5.QtWidgets import *
+from PyQt5.QtGui import *
+from PyQt5.QtCore import *
+from .models import Node, Connection
+import math
+
+class MindMapScene(QGraphicsScene):
+    def __init__(self):
+        super().__init__()
+        self.setSceneRect(-2000, -2000, 4000, 4000)
+        self.setBackgroundBrush(QColor("#FAFAFA"))
+        
+        # ثوابت التنسيق المحسنة
+        self.LEVEL_SPACING = 150      # زيادة المسافة الرأسية بين المستويات
+        self.NODE_SPACING = 180       # زيادة المسافة الأفقية بين العقد
+        self.MAX_NODES_PER_LEVEL = 4  # الحد الأقصى للعقد في كل مستوى
+        self.ROOT_Y = -800           # تعديل موقع العقدة الرئيسية للأعلى
+        
+        self.nodes = []
+        self.connections = []
+        self.root_node = None
+
+
+    def clear(self):
+        super().clear()
+        self.nodes = []
+        self.connections = []
+        self.root_node = None
+
+    def create_from_json(self, data):
+        self.clear()
+        self.nodes = []
+        self.connections = []
+        
+        # إنشاء العقدة المركزية
+        self.root_node = self.create_node(data['center'], 0)
+        self.root_node.setPos(0, self.ROOT_Y)
+        
+        if 'branches' in data:
+            # تنظيم الفروع في مجموعات
+            self.organize_branches_in_groups(self.root_node, data['branches'])
+        
+        self.optimize_layout()
+        self.center_on_root()
+
+    def organize_branches_in_groups(self, parent_node, branches_data, level=1):
+        if not branches_data:
+            return
+            
+        # تقسيم الفروع إلى مجموعات
+        groups = self.split_into_groups(branches_data)
+        
+        current_y = parent_node.pos().y()
+        for group_index, group in enumerate(groups):
+            # حساب موقع المجموعة
+            group_y = current_y + (self.LEVEL_SPACING * (group_index + 1))
+            group_width = len(group) * self.NODE_SPACING
+            start_x = -group_width / 2
+            
+            for i, branch_data in enumerate(group):
+                # إنشاء عقدة الفرع
+                node = self.create_node(branch_data['text'], level)
+                x = start_x + (i * self.NODE_SPACING)
+                node.setPos(x, group_y)
+                
+                # إنشاء الرابط
+                connection = self.create_connection(parent_node, node)
+                
+                # معالجة الفروع الفرعية بشكل عمودي
+                if 'children' in branch_data and branch_data['children']:
+                    self.organize_children_vertically(node, branch_data['children'], level + 1)
+
+    def organize_children_vertically(self, parent_node, children_data, level):
+        if not children_data:
+            return
+            
+        # تنظيم الأبناء بشكل عمودي
+        child_spacing = self.LEVEL_SPACING * 0.8  # مسافة أقل للمستويات العميقة
+        total_height = (len(children_data) - 1) * child_spacing
+        start_y = parent_node.pos().y() - (total_height / 2)
+        
+        for i, child_data in enumerate(children_data):
+            node = self.create_node(child_data['text'], level)
+            y = start_y + (i * child_spacing)
+            x = parent_node.pos().x() + self.NODE_SPACING
+            node.setPos(x, y)
+            
+            connection = self.create_connection(parent_node, node)
+            
+            if 'children' in child_data and child_data['children']:
+                self.organize_children_vertically(node, child_data['children'], level + 1)
+
+    def split_into_groups(self, branches_data):
+        """تقسيم الفروع إلى مجموعات متوازنة"""
+        groups = []
+        current_group = []
+        
+        for branch in branches_data:
+            current_group.append(branch)
+            if len(current_group) >= self.MAX_NODES_PER_LEVEL:
+                groups.append(current_group)
+                current_group = []
+        
+        if current_group:
+            groups.append(current_group)
+        
+        return groups
+
+    def create_node(self, text, level):
+        node = Node(text, level)
+        self.addItem(node)
+        self.nodes.append(node)
+        return node
+
+    def create_connection(self, start_node, end_node):
+        connection = Connection(start_node, end_node)
+        self.addItem(connection)
+        self.connections.append(connection)
+        return connection
+
+    def organize_tree(self, parent_node, branches_data, level=1):
+        if not branches_data:
+            return
+        
+        # حساب العرض الكلي للمستوى
+        level_width = len(branches_data) * (self.NODE_SPACING * (self.LEVEL_SCALE ** level))
+        start_x = -level_width / 2
+        spacing = self.NODE_SPACING * (self.LEVEL_SCALE ** level)
+        
+        nodes_at_level = []
+        for i, branch_data in enumerate(branches_data):
+            # إنشاء العقدة
+            node = self.create_node(branch_data['text'], level)
+            x = start_x + (i * spacing)
+            y = parent_node.pos().y() + self.LEVEL_SPACING
+            node.setPos(x, y)
+            nodes_at_level.append(node)
+            
+            # إنشاء الرابط
+            self.create_connection(parent_node, node)
+            
+            # معالجة الفروع الفرعية
+            if 'children' in branch_data and branch_data['children']:
+                self.organize_tree(node, branch_data['children'], level + 1)
+        
+        # تحسين توزيع العقد في نفس المستوى
+        self.adjust_level_spacing(nodes_at_level)
+
+    def adjust_level_spacing(self, nodes):
+        """تحسين المسافات بين العقد في نفس المستوى"""
+        if len(nodes) <= 1:
+            return
+            
+        min_spacing = self.NODE_SPACING * (self.LEVEL_SCALE ** nodes[0].level)
+        
+        # حساب وتصحيح التداخلات
+        for i in range(len(nodes) - 1):
+            current = nodes[i]
+            next_node = nodes[i + 1]
+            actual_spacing = next_node.pos().x() - current.pos().x()
+            
+            if actual_spacing < min_spacing:
+                shift = (min_spacing - actual_spacing) / 2
+                current.setPos(current.pos().x() - shift, current.pos().y())
+                next_node.setPos(next_node.pos().x() + shift, next_node.pos().y())
+
+
+    def optimize_layout(self):
+        """تحسين التخطيط النهائي"""
+        self.remove_overlaps()
+        self.balance_groups()
+        self.update_all_connections()
+
+    def remove_overlaps(self):
+        """إزالة التداخلات بين العقد"""
+        for node in self.nodes:
+            for other in self.nodes:
+                if node != other and abs(node.pos().y() - other.pos().y()) < 50:
+                    if abs(node.pos().x() - other.pos().x()) < 150:
+                        # تحريك العقد المتداخلة عمودياً
+                        shift = 60
+                        if node.pos().y() < other.pos().y():
+                            other.setPos(other.pos().x(), other.pos().y() + shift)
+                        else:
+                            node.setPos(node.pos().x(), node.pos().y() + shift)
+
+    def balance_groups(self):
+        """موازنة المجموعات أفقياً"""
+        for level in range(5):
+            level_nodes = [node for node in self.nodes if node.level == level]
+            if level_nodes:
+                avg_x = sum(node.pos().x() for node in level_nodes) / len(level_nodes)
+                for node in level_nodes:
+                    current_x = node.pos().x()
+                    new_x = current_x + (avg_x - current_x) * 0.3
+                    node.setPos(new_x, node.pos().y())
+
+    def update_all_connections(self):
+        for connection in self.connections:
+            connection.updatePosition()
+
+    def center_on_root(self):
+        if self.views() and self.root_node:
+            view = self.views()[0]
+            view.centerOn(self.root_node)
+            view.scale(0.7, 0.7)
+   
+    def mousePressEvent(self, event):
+        """معالجة النقر على العقد"""
+        super().mousePressEvent(event)
+        if event.button() == Qt.LeftButton:
+            item = self.itemAt(event.scenePos(), QTransform())
+            if isinstance(item, Node):
+                self.highlight_connected_nodes(item)
+
+    def highlight_connected_nodes(self, node):
+        """إبراز العقد المتصلة"""
+        for item in self.items():
+            if isinstance(item, Node):
+                item._is_highlighted = False
+                item.update()
+        
+        node._is_highlighted = True
+        for connection in self.connections:
+            if connection.startNode == node:
+                connection.endNode._is_highlighted = True
+                connection.endNode.update()
+            elif connection.endNode == node:
+                connection.startNode._is_highlighted = True
+                connection.startNode.update()
+        
+        node.update()

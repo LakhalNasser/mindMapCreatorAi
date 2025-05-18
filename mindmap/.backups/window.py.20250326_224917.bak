@@ -1,0 +1,133 @@
+from PyQt5.QtWidgets import *
+from PyQt5.QtGui import *
+from PyQt5.QtCore import *
+from .scene import MindMapScene
+import json
+
+class MindMapView(QGraphicsView):
+    def __init__(self, scene):
+        super().__init__(scene)
+        self.setRenderHint(QPainter.Antialiasing)
+        self.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
+        self.setResizeAnchor(QGraphicsView.AnchorUnderMouse)
+        self.scale(0.8, 0.8)
+        
+    def wheelEvent(self, event):
+        if event.modifiers() == Qt.ControlModifier:
+            factor = 1.1
+            if event.angleDelta().y() < 0:
+                factor = 0.9
+            self.scale(factor, factor)
+        else:
+            super().wheelEvent(event)
+
+class MindMapWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.initUI()
+        
+    def initUI(self):
+        self.setWindowTitle('MindMap Creator Pro')
+        self.setGeometry(100, 100, 1200, 800)
+        
+        self.scene = MindMapScene()
+        self.view = MindMapView(self.scene)
+        self.setCentralWidget(self.view)
+        
+        self.createToolBar()
+        self.createStatusBar()
+        
+    def createToolBar(self):
+        toolbar = QToolBar()
+        toolbar.setMovable(False)
+        self.addToolBar(toolbar)
+        
+        saveAction = QAction('Save', self)
+        saveAction.setShortcut('Ctrl+S')
+        saveAction.triggered.connect(self.saveMindMap)
+        toolbar.addAction(saveAction)
+        
+        loadAction = QAction('Load', self)
+        loadAction.setShortcut('Ctrl+O')
+        loadAction.triggered.connect(self.loadMindMap)
+        toolbar.addAction(loadAction)
+        
+        clearAction = QAction('Clear', self)
+        clearAction.setShortcut('Ctrl+N')
+        clearAction.triggered.connect(self.clearMindMap)
+        toolbar.addAction(clearAction)
+        
+    def createStatusBar(self):
+        statusBar = self.statusBar()
+        statusBar.showMessage('Right click: Add Node | Double click: Connect Nodes | Ctrl+Mouse Wheel: Zoom')
+        
+    def saveMindMap(self):
+        fileName, _ = QFileDialog.getSaveFileName(self, "Save Mind Map", "", "Mind Map Files (*.mmap)")
+        if fileName:
+            try:
+                self.saveToFile(fileName)
+                self.statusBar().showMessage('Mind map saved successfully', 3000)
+            except Exception as e:
+                QMessageBox.critical(self, 'Error', f'Failed to save mind map: {str(e)}')
+                
+    def loadMindMap(self):
+        fileName, _ = QFileDialog.getOpenFileName(self, "Load Mind Map", "", "Mind Map Files (*.mmap)")
+        if fileName:
+            try:
+                self.loadFromFile(fileName)
+                self.statusBar().showMessage('Mind map loaded successfully', 3000)
+            except Exception as e:
+                QMessageBox.critical(self, 'Error', f'Failed to load mind map: {str(e)}')
+    
+    def saveToFile(self, fileName):
+        data = {
+            'nodes': [],
+            'connections': []
+        }
+        
+        nodes = []
+        for item in self.scene.items():
+            if isinstance(item, Node):
+                nodes.append(item)
+                data['nodes'].append({
+                    'text': item.text,
+                    'x': item.pos().x(),
+                    'y': item.pos().y()
+                })
+            elif isinstance(item, Connection):
+                data['connections'].append({
+                    'start': nodes.index(item.startNode),
+                    'end': nodes.index(item.endNode)
+                })
+                
+        with open(fileName, 'w') as f:
+            json.dump(data, f)
+            
+    def loadFromFile(self, fileName):
+        self.clearMindMap()
+        
+        with open(fileName, 'r') as f:
+            data = json.load(f)
+            
+        nodes = []
+        for nodeData in data['nodes']:
+            node = Node(nodeData['text'])
+            node.setPos(nodeData['x'], nodeData['y'])
+            self.scene.addItem(node)
+            nodes.append(node)
+            
+        for connData in data['connections']:
+            conn = Connection(nodes[connData['start']], nodes[connData['end']])
+            self.scene.addItem(conn)
+            
+    def clearMindMap(self):
+        reply = QMessageBox.question(self, 'Clear Mind Map',
+                                   'Are you sure you want to clear the mind map?',
+                                   QMessageBox.Yes | QMessageBox.No)
+        
+        if reply == QMessageBox.Yes:
+            self.scene.clear()
+            self.statusBar().showMessage('Mind map cleared', 3000)
